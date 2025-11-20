@@ -193,12 +193,4 @@ README.md
 ---
 
 ## 📞 Suporte e Ajustes
-
-Se quiser, posso gerar também:
-
-* Diagrama do fluxo de comunicação
-* Mapa visual dos canais
-* Planilha pronta para importar no Vixen
-* Diagrama elétrico
-
-Basta pedir! 😊
+(19)98156-0869
