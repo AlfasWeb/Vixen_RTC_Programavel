@@ -192,5 +192,27 @@ README.md
 
 ---
 
+## Comunicação Serial
+
+O sistema aceita dois tipos de comunicação: frames do **Vixen** (iniciados por `$`) e **comandos de configuração/controle** enviados via texto com terminador `;`.
+
+### 📌 Lista de Comandos Disponíveis
+
+Abaixo estão todos os comandos implementados no módulo `Commands.cpp`:
+
+| Comando  | Exemplo              | Função                                                      |
+| -------- | -------------------- | ----------------------------------------------------------- |
+| `TIME=`  | `TIME=14:32:00;`     | Ajusta o horário do RTC DS1307                              |
+| `DATE=`  | `DATE=2025-01-20;`   | Ajusta a data do RTC                                        |
+| `ADD=`   | `ADD=1,18:00,22:30;` | Adiciona programação para ligar no dia e hora especificados |
+| `DEL=`   | `DEL=1;`             | Remove a programação com ID informado                       |
+| `CLEAR;` | `CLEAR;`             | Remove todas as programações                                |
+| `LIST;`  | `LIST;`              | Lista todas as programações existentes                      |
+| `SAVE;`  | `SAVE;`              | Salva programações atuais na EEPROM                         |
+| `LOAD;`  | `LOAD;`              | Recarrega programações da EEPROM                            |
+| `NOW;`   | `NOW;`               | Mostra a data e hora atual do RTC                           |
+| `HELP;`  | `HELP;`              | Mostra todos os comandos disponíveis                        |
+
+---
 ## 📞 Suporte e Ajustes
 (19)98156-0869
