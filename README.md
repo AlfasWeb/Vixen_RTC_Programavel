@@ -4,6 +4,17 @@
 
 Este documento descreve detalhadamente o funcionamento, arquitetura, comunicação e lógica do firmware desenvolvido para o controlador de iluminação utilizado com o software **Vixen Lights**, integrando **relés**, **PCF8574**, **74HC595**, **fitas/cordões WS2811** e um **RTC DS1307** com programação interna.
 
+Este documento descreve **toda a lógica do firmware**, incluindo:
+
+* Arquitetura geral
+* Mapeamento dos canais
+* Funcionamento dos relés (PCF8574 e 74HC595)
+* Funcionamento dos LEDs (WS2812/WS2811)
+* Modo Standby
+* Rotina de autoteste
+* Protocolo de comunicação serial
+* Comandos disponíveis (#pg, #rm, #dt, #at, #hr, #st)
+
 ---
 
 ## 📌 Visão Geral do Sistema
@@ -192,27 +203,121 @@ README.md
 
 ---
 
-## Comunicação Serial
+# 📡 Protocolo de Comando Serial
 
-O sistema aceita dois tipos de comunicação: frames do **Vixen** (iniciados por `$`) e **comandos de configuração/controle** enviados via texto com terminador `;`.
+Todos os comandos seguem o formato:
 
-### 📌 Lista de Comandos Disponíveis
+```
+#comando...;
+```
 
-Abaixo estão todos os comandos implementados no módulo `Commands.cpp`:
+Ou seja:
 
-| Comando  | Exemplo              | Função                                                      |
-| -------- | -------------------- | ----------------------------------------------------------- |
-| `TIME=`  | `TIME=14:32:00;`     | Ajusta o horário do RTC DS1307                              |
-| `DATE=`  | `DATE=2025-01-20;`   | Ajusta a data do RTC                                        |
-| `ADD=`   | `ADD=1,18:00,22:30;` | Adiciona programação para ligar no dia e hora especificados |
-| `DEL=`   | `DEL=1;`             | Remove a programação com ID informado                       |
-| `CLEAR;` | `CLEAR;`             | Remove todas as programações                                |
-| `LIST;`  | `LIST;`              | Lista todas as programações existentes                      |
-| `SAVE;`  | `SAVE;`              | Salva programações atuais na EEPROM                         |
-| `LOAD;`  | `LOAD;`              | Recarrega programações da EEPROM                            |
-| `NOW;`   | `NOW;`               | Mostra a data e hora atual do RTC                           |
-| `HELP;`  | `HELP;`              | Mostra todos os comandos disponíveis                        |
+* Sempre começam com `#`
+* Sempre terminam com `;`
+* Não têm quebras de linha
 
+---
+
+# 🧩 Lista Completa de Comandos Implementados
+
+*(capturado diretamente do firmware `Commands.cpp`)*
+
+---
+
+## ✅ 1. Criar/Editar Programação
+
+### **`#pgX,dias,HHini,MMini,HHfim,MMfim;`**
+
+* **X** = número do slot (1 a 10)
+* **dias** = 7 caracteres (0/1) indicando os dias da semana:
+
+```
+Dom Seg Ter Qua Qui Sex Sab
+```
+
+Exemplo ativando todos os dias das 18:00 às 23:00:
+
+```
+#pg1,1111111,18,00,23,00;
+```
+
+Ao salvar, a programação já fica **ativa automaticamente**.
+
+---
+
+## 🗑 2. Remover programação
+
+### **`#rmX;`**
+
+Exemplo:
+
+```
+#rm3;
+```
+
+Remove permanentemente o slot 3.
+
+---
+
+## 🚫 3. Desativar programação
+
+### **`#dtX;`**
+
+Mantém os dados, apenas desativa:
+
+```
+#dt2;
+```
+
+---
+
+## ✅ 4. Ativar programação existente
+
+### **`#atX;`**
+
+```
+#at4;
+```
+
+---
+
+## 🕒 5. Ajustar data e hora do RTC
+
+### **`#hrHH,MM,DD,MM,YYYY;`**
+
+Exemplo:
+
+```
+#hr21,30,15,09,2024;
+```
+
+Ajusta: **21:30 – 15/09/2024**.
+
+---
+
+## 📄 6. Status geral
+
+### **`#st;`**
+
+Exibe todas as programações salvas e se estão **ativas agora**:
+
+```
+=== STATUS DAS PROGRAMACOES ===
+PG1: (ATIVADO) Dias: Seg Ter ... | 18:00 -> 23:00 | Agora: ON
+...
+=== FIM DO STATUS ===
+```
+
+---
+
+## ❌ 7. Comando desconhecido
+
+Caso o comando não seja reconhecido:
+
+```
+ERR: comando desconhecido
+```
 ---
 ## 📞 Suporte e Ajustes
 (19)98156-0869
