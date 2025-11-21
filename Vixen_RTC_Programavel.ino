@@ -164,6 +164,130 @@ void atualizarRele() {
   static bool tw_relayStates[32] = {false};
   static unsigned long tw_nextUpdate[32] = {0};
 
+  // ==== Variáveis Meteor Rain ====
+static unsigned long mr_lastStep = 0;
+static int mr_pos = 0;
+static int mr_dir = 1;  // 1 = vai para frente, -1 = volta
+const int MR_SIZE = 10; // comprimento do meteoro
+const int MR_SPEED = 30;
+
+// ==== Variáveis Pulse Waves ====
+static unsigned long pw_lastStep = 0;
+static uint8_t pw_phase = 0;
+
+// ==== Variáveis Fire Flicker ====
+static unsigned long ff_lastStep = 0;
+static byte heat1[NUM_LEDS1];
+static byte heat2[NUM_LEDS2];
+
+// ==== Variáveis Lightning ====
+static unsigned long lt_nextFlash = 0;
+static bool lt_isFlashing = false;
+static unsigned long lt_flashEndTime = 0;
+
+void effectLightning() {
+    unsigned long now = millis();
+
+    // Se não está piscando, espera até o próximo raio
+    if (!lt_isFlashing) {
+        if (now > lt_nextFlash) {
+            lt_isFlashing = true;
+            lt_flashEndTime = now + random(50, 150);  // duração do flash
+        } else {
+            // Mantém tudo apagado
+            fill_solid(leds1, NUM_LEDS1, CRGB::Black);
+            fill_solid(leds2, NUM_LEDS2, CRGB::Black);
+            return;
+        }
+    }
+
+    // Está piscando (clarão)
+    if (now < lt_flashEndTime) {
+        CRGB flashColor = CRGB(255, 255, 255);
+
+        for (int i = 0; i < NUM_LEDS1; i++)
+            leds1[i] = flashColor;
+
+        for (int i = 0; i < NUM_LEDS2; i++)
+            leds2[i] = flashColor;
+
+    } else {
+        // Flash terminou
+        lt_isFlashing = false;
+        lt_nextFlash = now + random(500, 3000); // tempo até próximo raio (0.5–3s)
+
+        // apaga após o flash
+        fill_solid(leds1, NUM_LEDS1, CRGB::Black);
+        fill_solid(leds2, NUM_LEDS2, CRGB::Black);
+    }
+}
+
+void effectFire() {
+    unsigned long now = millis();
+    if (now - ff_lastStep < 40) return;  
+    ff_lastStep = now;
+
+    // ---- Tira 1 ----
+    for (int i = 0; i < NUM_LEDS1; i++) {
+        heat1[i] = qsub8(heat1[i], random8(0, 20));   // perde calor
+        heat1[i] = qadd8(heat1[i], random8(0, 30));   // ganha calor
+        leds1[i] = HeatColor(heat1[i]);               // converte calor → cor
+    }
+
+    // ---- Tira 2 ----
+    for (int i = 0; i < NUM_LEDS2; i++) {
+        heat2[i] = qsub8(heat2[i], random8(0, 20));
+        heat2[i] = qadd8(heat2[i], random8(0, 30));
+        leds2[i] = HeatColor(heat2[i]);
+    }
+}
+
+void effectPulse() {
+    unsigned long now = millis();
+    if (now - pw_lastStep < 25) return;
+    pw_lastStep = now;
+
+    pw_phase++;
+
+    for (int i = 0; i < NUM_LEDS1; i++) {
+        uint8_t wave = sin8(pw_phase + i * 4);
+        leds1[i] = CHSV(128, 255, wave); // Azul-esverdeado pulsando
+    }
+
+    for (int i = 0; i < NUM_LEDS2; i++) {
+        uint8_t wave = sin8(pw_phase + i * 5);
+        leds2[i] = CHSV(32, 255, wave); // Laranja pulsando
+    }
+}
+
+void effectMeteor() {
+    unsigned long now = millis();
+    if (now - mr_lastStep < MR_SPEED) return;
+    mr_lastStep = now;
+
+    // Apaga lentamente — rastro
+    for (int i = 0; i < NUM_LEDS1; i++) leds1[i].fadeToBlackBy(40);
+    for (int i = 0; i < NUM_LEDS2; i++) leds2[i].fadeToBlackBy(40);
+
+    // Desenha meteoro brilhante
+    for (int i = 0; i < MR_SIZE; i++) {
+        int p1 = mr_pos - i;
+        int p2 = mr_pos - i;
+        if (p1 >= 0 && p1 < NUM_LEDS1)
+            leds1[p1] = CHSV(0 + i * 8, 255, 255);
+
+        if (p2 >= 0 && p2 < NUM_LEDS2)
+            leds2[p2] = CHSV(160 + i * 8, 255, 255);
+    }
+
+    // Atualiza posição
+    mr_pos += mr_dir;
+
+    // Bate nas bordas
+    if (mr_pos >= NUM_LEDS1 - 1 || mr_pos <= 0)
+        mr_dir *= -1;
+}
+
   void effectFade() {
     unsigned long now = millis();
     if (now - fade_lastStep >= 30) {
@@ -193,32 +317,36 @@ void effectRainbow() {
 }
 
 void effectTwinkle() {
-    unsigned long now = millis();
-    if (now - tw_lastUpdate >= 150) {
-        tw_lastUpdate = now;
+  unsigned long now = millis();
+  if (now - tw_lastUpdate >= 150) {
+      tw_lastUpdate = now;
 
-        for (int i = 0; i < NUM_LEDS1; i++)
-            leds1[i] = CRGB(random(255), random(255), random(255));
+      for (int i = 0; i < NUM_LEDS1; i++)
+          leds1[i] = CRGB(random(255), random(255), random(255));
 
-        for (int i = 0; i < NUM_LEDS2; i++)
-            leds2[i] = CRGB(random(255), random(255), random(255));
-    }
+      for (int i = 0; i < NUM_LEDS2; i++)
+          leds2[i] = CRGB(random(255), random(255), random(255));
+  }
+}
+
+void runLocalEffects() {
+  unsigned long now = millis();
+
+  if (now - lastEffectChange >= EFFECT_INTERVAL) {
+      effectIndex = (effectIndex + 1) % 7;
+      lastEffectChange = now;
   }
 
-  void runLocalEffects() {
-    unsigned long now = millis();
-
-    if (now - lastEffectChange >= EFFECT_INTERVAL) {
-        effectIndex = (effectIndex + 1) % 3;
-        lastEffectChange = now;
-    }
-
-    switch (effectIndex) {
-        case 0: effectRainbow(); break;
-        case 1: effectFade(); break;
-        case 2: effectTwinkle(); break;
-    }
+  switch (effectIndex) {
+      case 0: effectRainbow(); break;
+      case 1: effectFade(); break;
+      case 2: effectTwinkle(); break;
+      case 3: effectPulse(); break;
+      case 4: effectMeteor(); break;
+      case 5: effectFire(); break;
+      case 6: effectLightning(); break;
   }
+}
 
 
 // ===== Setup =====
