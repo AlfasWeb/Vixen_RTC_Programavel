@@ -139,6 +139,88 @@ void atualizarRele() {
   pushShiftRegistersFromBuffer();
 }
 
+// ----------------------------------------------------
+// Variáveis internas dos efeitos
+// ----------------------------------------------------
+  static uint8_t effectIndex = 0;
+  static unsigned long lastEffectChange = 0;
+  const unsigned long EFFECT_INTERVAL = 20000; //a cada 20 segundos ele troca o efeito
+
+  // ==== Variáveis do efeito Fade ====
+  static int fade_v = 0;
+  static int fade_dir = 1;
+  static int fade_relayIndex = 0;
+  static unsigned long fade_lastStep = 0;
+
+  // ==== Variáveis do Rainbow ====
+  static uint16_t rb_hue = 0;
+  static int rb_step = 0;
+  static int rb_dir = 1;
+  static unsigned long rb_lastStep = 0;
+
+  // ==== Variáveis Twinkle ====
+  static unsigned long tw_lastUpdate = 0;
+  static unsigned long tw_relayTimers[32] = {0};
+  static bool tw_relayStates[32] = {false};
+  static unsigned long tw_nextUpdate[32] = {0};
+
+  void effectFade() {
+    unsigned long now = millis();
+    if (now - fade_lastStep >= 30) {
+        fade_lastStep = now;
+
+        fade_v += fade_dir * 5;
+        if (fade_v >= 255 || fade_v <= 0) fade_dir *= -1;
+
+        for (int i = 0; i < NUM_LEDS1; i++) leds1[i] = CRGB(fade_v, 0, 255 - fade_v);
+        for (int i = 0; i < NUM_LEDS2; i++) leds2[i] = CRGB(fade_v, 0, 255 - fade_v);
+    }
+}
+
+void effectRainbow() {
+    unsigned long now = millis();
+    if (now - rb_lastStep >= 20) {
+        rb_lastStep = now;
+
+        rb_hue += 2;
+
+        for (int i = 0; i < NUM_LEDS1; i++)
+            leds1[i] = CHSV(rb_hue + i * 4, 255, 255);
+
+        for (int i = 0; i < NUM_LEDS2; i++)
+            leds2[i] = CHSV(rb_hue + i * 4, 255, 255);
+    }
+}
+
+void effectTwinkle() {
+    unsigned long now = millis();
+    if (now - tw_lastUpdate >= 150) {
+        tw_lastUpdate = now;
+
+        for (int i = 0; i < NUM_LEDS1; i++)
+            leds1[i] = CRGB(random(255), random(255), random(255));
+
+        for (int i = 0; i < NUM_LEDS2; i++)
+            leds2[i] = CRGB(random(255), random(255), random(255));
+    }
+  }
+
+  void runLocalEffects() {
+    unsigned long now = millis();
+
+    if (now - lastEffectChange >= EFFECT_INTERVAL) {
+        effectIndex = (effectIndex + 1) % 3;
+        lastEffectChange = now;
+    }
+
+    switch (effectIndex) {
+        case 0: effectRainbow(); break;
+        case 1: effectFade(); break;
+        case 2: effectTwinkle(); break;
+    }
+  }
+
+
 // ===== Setup =====
 void setup() {
   Serial.begin(57600);
@@ -181,6 +263,8 @@ void setup() {
 
   // Carrega programações da EEPROM (Commands.cpp)
   carregarProgramacoesEEPROM(tarefa);
+  //Inicializador de efeitos
+  lastEffectChange = millis();
 
   ultimaRecepcao = millis();   // impede standby imediato
   Serial.println("🚀 Sistema iniciado. Aguardando '$'...");
@@ -280,18 +364,12 @@ void loop() {
         // Liga TODOS os relés (atualiza buffer e módulos físicos)
         ligarTodosRele();
       }
-
-      // Efeito RGB (igual ao original)
-      static uint8_t hue = 0;
-      static unsigned long lastStandby = 0;
-      if (millis() - lastStandby > 30) {
-        hue++;
-        fill_solid(leds1, NUM_LEDS1, CHSV(hue, 255, 200));
-        fill_solid(leds2, NUM_LEDS2, CHSV(hue + 64, 255, 200));
-        FastLED.show();
-        lastStandby = millis();
-      }
     }
+    runLocalEffects();
+    // ATUALIZAR LEDS E RELES MESMO EM STANDBY
+    atualizarRele();
+    FastLED.show();
+    digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
     return; // volta cedo como no original (impede atualização normal)
   }
 
@@ -309,9 +387,8 @@ void loop() {
   // ================================
   static unsigned long lastUpdate = 0;
   if (!recebendoFrame && millis() - lastUpdate > 0) {
-    // Escreve bufferRele nos expansores / shift registers
-    atualizarRele();
-    FastLED.show();
+    atualizarRele();  // escreve os reles
+    FastLED.show();   // ATUALIZA OS LEDS — SOMENTE AQUI!
     digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
     lastUpdate = millis();
   }
