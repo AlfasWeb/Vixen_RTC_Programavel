@@ -180,47 +180,72 @@ static unsigned long ff_lastStep = 0;
 static byte heat1[NUM_LEDS1];
 static byte heat2[NUM_LEDS2];
 
-// ==== Variáveis Lightning ====
-static unsigned long lt_nextFlash = 0;
-static bool lt_isFlashing = false;
-static unsigned long lt_flashEndTime = 0;
+// ---- Variáveis internas do Lightning ----
+static bool lt_active = false;
+static int lt_phase = 0;
+static unsigned long lt_nextEvent = 0;
+static uint8_t lt_brightness = 0;
 
 void effectLightning() {
-    unsigned long now = millis();
+  unsigned long now = millis();
+  if (now < lt_nextEvent) return;
 
-    // Se não está piscando, espera até o próximo raio
-    if (!lt_isFlashing) {
-        if (now > lt_nextFlash) {
-            lt_isFlashing = true;
-            lt_flashEndTime = now + random(50, 150);  // duração do flash
-        } else {
-            // Mantém tudo apagado
-            fill_solid(leds1, NUM_LEDS1, CRGB::Black);
-            fill_solid(leds2, NUM_LEDS2, CRGB::Black);
-            return;
-        }
-    }
+  // Inicia sequência de raio
+  if (!lt_active) {
+      lt_active = true;
+      lt_phase = 0;
+      lt_nextEvent = now + random(1000, 4000);  // tempo até o próximo raio
+      return;
+  }
 
-    // Está piscando (clarão)
-    if (now < lt_flashEndTime) {
-        CRGB flashColor = CRGB(255, 255, 255);
+  switch (lt_phase) {
+    case 0:  // FLASH forte
+        lt_brightness = 255;
+        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        FastLED.show();
+        lt_phase = 1;
+        lt_nextEvent = now + random(20, 60);  // duração curto
+        break;
 
-        for (int i = 0; i < NUM_LEDS1; i++)
-            leds1[i] = flashColor;
+    case 1:  // FLICKER fraco
+        lt_brightness = random(80, 150);
+        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        FastLED.show();
+        lt_phase = 2;
+        lt_nextEvent = now + random(30, 80);
+        break;
 
-        for (int i = 0; i < NUM_LEDS2; i++)
-            leds2[i] = flashColor;
+    case 2:  // FLASH médio
+        lt_brightness = random(180, 255);
+        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        FastLED.show();
+        lt_phase = 3;
+        lt_nextEvent = now + random(20, 50);
+        break;
 
-    } else {
-        // Flash terminou
-        lt_isFlashing = false;
-        lt_nextFlash = now + random(500, 3000); // tempo até próximo raio (0.5–3s)
+    case 3:  // PÓS-BRILHO suave
+        lt_brightness = 50;
+        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
+        FastLED.show();
+        lt_phase = 4;
+        lt_nextEvent = now + random(50, 120);
+        break;
 
-        // apaga após o flash
+    case 4:  // Fim da sequência → apaga
         fill_solid(leds1, NUM_LEDS1, CRGB::Black);
         fill_solid(leds2, NUM_LEDS2, CRGB::Black);
-    }
+        FastLED.show();
+
+        lt_active = false;
+        lt_nextEvent = now + random(3000, 8000);  // Próximo raio
+        break;
+  }
 }
+
 
 void effectFire() {
     unsigned long now = millis();
@@ -229,15 +254,27 @@ void effectFire() {
 
     // ---- Tira 1 ----
     for (int i = 0; i < NUM_LEDS1; i++) {
-        heat1[i] = qsub8(heat1[i], random8(0, 20));   // perde calor
-        heat1[i] = qadd8(heat1[i], random8(0, 30));   // ganha calor
-        leds1[i] = HeatColor(heat1[i]);               // converte calor → cor
+
+        // Resfriamento
+        heat1[i] = qsub8(heat1[i], random8(0, 10));
+
+        // Aquecimento suave (evita branco!)
+        if (random8() < 120) {  
+            heat1[i] = qadd8(heat1[i], random8(0, 12));
+        }
+
+        leds1[i] = HeatColor(heat1[i]);
     }
 
     // ---- Tira 2 ----
     for (int i = 0; i < NUM_LEDS2; i++) {
-        heat2[i] = qsub8(heat2[i], random8(0, 20));
-        heat2[i] = qadd8(heat2[i], random8(0, 30));
+
+        heat2[i] = qsub8(heat2[i], random8(0, 10));
+
+        if (random8() < 120) {  
+            heat2[i] = qadd8(heat2[i], random8(0, 12));
+        }
+
         leds2[i] = HeatColor(heat2[i]);
     }
 }
