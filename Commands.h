@@ -10,7 +10,7 @@ void salvarProgramacoesEEPROM(Programador &prog);
 void carregarProgramacoesEEPROM(Programador &prog);
 
 // Processamento de comandos
-void processaComando(String cmd, Programador &prog, RTC_DS1307 &rtc);
+void processaComando(const char *cmdRaw, Programador &prog, RTC_DS1307 &rtc);
 void processaByteSerial(byte b, Programador &prog, RTC_DS1307 &rtc);
 
 #endif

@@ -4,6 +4,7 @@
 #include "RTClib.h"
 #include "Programador.h"
 #include "Commands.h"
+#include <avr/wdt.h>
 
 //====Programador=====
 RTC_DS1307 rtc;
@@ -36,6 +37,7 @@ Programador tarefa;
 
 // Inverte lógica por módulo PCF se necessário (true = invertido)
 bool invertPCF[QTDE_PCF] = { true, true };
+bool pcfPresente[QTDE_PCF] = { false };
 
 Adafruit_PCF8574 pcfs[QTDE_PCF];
 CRGB leds1[NUM_LEDS1];
@@ -126,284 +128,202 @@ void setRele(int canal, bool estado) {
 
 // ---------- atualizarRele: escreve bufferRele nos PCFs e CIs ----------
 void atualizarRele() {
-  // PCFs: bytes 0..(QTDE_PCF-1) — cada bit mapeia pino 0..7
-  for (int j = 0; j < QTDE_PCF * 8; j++) {
-    int modulo = j / 8;
-    int pino   = j % 8;
-    bool estado = (bufferRele[modulo] >> pino) & 0x01;
-    // Respeita invertPCF: se invertido, o pino físico recebe !estado
-    pcfs[modulo].digitalWrite(pino, invertPCF[modulo] ? !estado : estado);
+  for (int modulo = 0; modulo < QTDE_PCF; modulo++) {
+    if (!pcfPresente[modulo]) continue;
+    uint8_t byteFinal = bufferRele[modulo];
+    if (invertPCF[modulo]) byteFinal = ~byteFinal;
+    // método disponível em Adafruit_PCF8574:
+    pcfs[modulo].digitalWriteByte(byteFinal);
   }
-
-  // CIs: já guardados em bufferRele[QTDE_PCF .. QTDE_PCF+QTDE_CI-1]
   pushShiftRegistersFromBuffer();
 }
 
-// ----------------------------------------------------
+// ---------------- Efeitos (não chamam FastLED.show()) ----------------
 // Variáveis internas dos efeitos
-// ----------------------------------------------------
-  static uint8_t effectIndex = 0;
-  static unsigned long lastEffectChange = 0;
-  const unsigned long EFFECT_INTERVAL = 20000; //a cada 20 segundos ele troca o efeito
+static uint8_t effectIndex = 0;
+static unsigned long lastEffectChange = 0;
+const unsigned long EFFECT_INTERVAL = 20000UL; // 20s
 
-  // ==== Variáveis do efeito Fade ====
-  static int fade_v = 0;
-  static int fade_dir = 1;
-  static int fade_relayIndex = 0;
-  static unsigned long fade_lastStep = 0;
+// Fade
+static int fade_v = 0;
+static int fade_dir = 1;
+static unsigned long fade_lastStep = 0;
 
-  // ==== Variáveis do Rainbow ====
-  static uint16_t rb_hue = 0;
-  static int rb_step = 0;
-  static int rb_dir = 1;
-  static unsigned long rb_lastStep = 0;
+// Rainbow
+static uint16_t rb_hue = 0;
+static unsigned long rb_lastStep = 0;
 
-  // ==== Variáveis Twinkle ====
-  static unsigned long tw_lastUpdate = 0;
-  static unsigned long tw_relayTimers[32] = {0};
-  static bool tw_relayStates[32] = {false};
-  static unsigned long tw_nextUpdate[32] = {0};
+// Twinkle
+static unsigned long tw_lastUpdate = 0;
 
-  // ==== Variáveis Meteor Rain ====
+// Meteor
 static unsigned long mr_lastStep = 0;
 static int mr_pos = 0;
-static int mr_dir = 1;  // 1 = vai para frente, -1 = volta
-const int MR_SIZE = 10; // comprimento do meteoro
+static int mr_dir = 1;
+const int MR_SIZE = 10;
 const int MR_SPEED = 30;
 
-// ==== Variáveis Pulse Waves ====
+// Pulse
 static unsigned long pw_lastStep = 0;
 static uint8_t pw_phase = 0;
 
-// ==== Variáveis Fire Flicker ====
+// Fire flicker
 static unsigned long ff_lastStep = 0;
 static byte heat1[NUM_LEDS1];
 static byte heat2[NUM_LEDS2];
 
-// ---- Variáveis internas do Lightning ----
+// Lightning (raio com fases)
 static bool lt_active = false;
 static int lt_phase = 0;
 static unsigned long lt_nextEvent = 0;
 static uint8_t lt_brightness = 0;
 
-void effectLightning() {
+void effectFade_update() {
   unsigned long now = millis();
-  if (now < lt_nextEvent) return;
-
-  // Inicia sequência de raio
-  if (!lt_active) {
-      lt_active = true;
-      lt_phase = 0;
-      lt_nextEvent = now + random(1000, 4000);  // tempo até o próximo raio
-      return;
-  }
-
-  switch (lt_phase) {
-    case 0:  // FLASH forte
-        lt_brightness = 255;
-        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        FastLED.show();
-        lt_phase = 1;
-        lt_nextEvent = now + random(20, 60);  // duração curto
-        break;
-
-    case 1:  // FLICKER fraco
-        lt_brightness = random(80, 150);
-        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        FastLED.show();
-        lt_phase = 2;
-        lt_nextEvent = now + random(30, 80);
-        break;
-
-    case 2:  // FLASH médio
-        lt_brightness = random(180, 255);
-        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        FastLED.show();
-        lt_phase = 3;
-        lt_nextEvent = now + random(20, 50);
-        break;
-
-    case 3:  // PÓS-BRILHO suave
-        lt_brightness = 50;
-        fill_solid(leds1, NUM_LEDS1, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        fill_solid(leds2, NUM_LEDS2, CRGB(lt_brightness, lt_brightness, lt_brightness));
-        FastLED.show();
-        lt_phase = 4;
-        lt_nextEvent = now + random(50, 120);
-        break;
-
-    case 4:  // Fim da sequência → apaga
-        fill_solid(leds1, NUM_LEDS1, CRGB::Black);
-        fill_solid(leds2, NUM_LEDS2, CRGB::Black);
-        FastLED.show();
-
-        lt_active = false;
-        lt_nextEvent = now + random(3000, 8000);  // Próximo raio
-        break;
-  }
+  if (now - fade_lastStep < 30) return;
+  fade_lastStep = now;
+  fade_v += fade_dir * 5;
+  if (fade_v >= 255 || fade_v <= 0) fade_dir *= -1;
+  for (int i = 0; i < NUM_LEDS1; i++) leds1[i] = CRGB(fade_v, 0, 255 - fade_v);
+  for (int i = 0; i < NUM_LEDS2; i++) leds2[i] = CRGB(fade_v, 0, 255 - fade_v);
 }
 
-
-void effectFire() {
-    unsigned long now = millis();
-    if (now - ff_lastStep < 40) return;  
-    ff_lastStep = now;
-
-    // ---- Tira 1 ----
-    for (int i = 0; i < NUM_LEDS1; i++) {
-
-        // Resfriamento
-        heat1[i] = qsub8(heat1[i], random8(0, 10));
-
-        // Aquecimento suave (evita branco!)
-        if (random8() < 120) {  
-            heat1[i] = qadd8(heat1[i], random8(0, 12));
-        }
-
-        leds1[i] = HeatColor(heat1[i]);
-    }
-
-    // ---- Tira 2 ----
-    for (int i = 0; i < NUM_LEDS2; i++) {
-
-        heat2[i] = qsub8(heat2[i], random8(0, 10));
-
-        if (random8() < 120) {  
-            heat2[i] = qadd8(heat2[i], random8(0, 12));
-        }
-
-        leds2[i] = HeatColor(heat2[i]);
-    }
-}
-
-void effectPulse() {
-    unsigned long now = millis();
-    if (now - pw_lastStep < 25) return;
-    pw_lastStep = now;
-
-    pw_phase++;
-
-    for (int i = 0; i < NUM_LEDS1; i++) {
-        uint8_t wave = sin8(pw_phase + i * 4);
-        leds1[i] = CHSV(128, 255, wave); // Azul-esverdeado pulsando
-    }
-
-    for (int i = 0; i < NUM_LEDS2; i++) {
-        uint8_t wave = sin8(pw_phase + i * 5);
-        leds2[i] = CHSV(32, 255, wave); // Laranja pulsando
-    }
-}
-
-void effectMeteor() {
-    unsigned long now = millis();
-    if (now - mr_lastStep < MR_SPEED) return;
-    mr_lastStep = now;
-
-    // Apaga lentamente — rastro
-    for (int i = 0; i < NUM_LEDS1; i++) leds1[i].fadeToBlackBy(40);
-    for (int i = 0; i < NUM_LEDS2; i++) leds2[i].fadeToBlackBy(40);
-
-    // Desenha meteoro brilhante
-    for (int i = 0; i < MR_SIZE; i++) {
-        int p1 = mr_pos - i;
-        int p2 = mr_pos - i;
-        if (p1 >= 0 && p1 < NUM_LEDS1)
-            leds1[p1] = CHSV(0 + i * 8, 255, 255);
-
-        if (p2 >= 0 && p2 < NUM_LEDS2)
-            leds2[p2] = CHSV(160 + i * 8, 255, 255);
-    }
-
-    // Atualiza posição
-    mr_pos += mr_dir;
-
-    // Bate nas bordas
-    if (mr_pos >= NUM_LEDS1 - 1 || mr_pos <= 0)
-        mr_dir *= -1;
-}
-
-  void effectFade() {
-    unsigned long now = millis();
-    if (now - fade_lastStep >= 30) {
-        fade_lastStep = now;
-
-        fade_v += fade_dir * 5;
-        if (fade_v >= 255 || fade_v <= 0) fade_dir *= -1;
-
-        for (int i = 0; i < NUM_LEDS1; i++) leds1[i] = CRGB(fade_v, 0, 255 - fade_v);
-        for (int i = 0; i < NUM_LEDS2; i++) leds2[i] = CRGB(fade_v, 0, 255 - fade_v);
-    }
-}
-
-void effectRainbow() {
-    unsigned long now = millis();
-    if (now - rb_lastStep >= 20) {
-        rb_lastStep = now;
-
-        rb_hue += 2;
-
-        for (int i = 0; i < NUM_LEDS1; i++)
-            leds1[i] = CHSV(rb_hue + i * 4, 255, 255);
-
-        for (int i = 0; i < NUM_LEDS2; i++)
-            leds2[i] = CHSV(rb_hue + i * 4, 255, 255);
-    }
-}
-
-void effectTwinkle() {
+void effectRainbow_update() {
   unsigned long now = millis();
-  if (now - tw_lastUpdate >= 150) {
-      tw_lastUpdate = now;
+  if (now - rb_lastStep < 20) return;
+  rb_lastStep = now;
+  rb_hue += 2;
+  for (int i = 0; i < NUM_LEDS1; i++) leds1[i] = CHSV(rb_hue + i * 4, 255, 255);
+  for (int i = 0; i < NUM_LEDS2; i++) leds2[i] = CHSV(rb_hue + i * 4, 255, 255);
+}
 
-      for (int i = 0; i < NUM_LEDS1; i++)
-          leds1[i] = CRGB(random(255), random(255), random(255));
+void effectTwinkle_update() {
+  unsigned long now = millis();
+  if (now - tw_lastUpdate < 150) return;
+  tw_lastUpdate = now;
+  for (int i = 0; i < NUM_LEDS1; i++) leds1[i] = CRGB(random8(), random8(), random8());
+  for (int i = 0; i < NUM_LEDS2; i++) leds2[i] = CRGB(random8(), random8(), random8());
+}
 
-      for (int i = 0; i < NUM_LEDS2; i++)
-          leds2[i] = CRGB(random(255), random(255), random(255));
+void effectPulse_update() {
+  unsigned long now = millis();
+  if (now - pw_lastStep < 25) return;
+  pw_lastStep = now;
+  pw_phase++;
+  for (int i = 0; i < NUM_LEDS1; i++) {
+    uint8_t wave = sin8(pw_phase + i * 4);
+    leds1[i] = CHSV(128, 255, wave);
   }
+  for (int i = 0; i < NUM_LEDS2; i++) {
+    uint8_t wave = sin8(pw_phase + i * 5);
+    leds2[i] = CHSV(32, 255, wave);
+  }
+}
+
+void effectMeteor_update() {
+  unsigned long now = millis();
+  if (now - mr_lastStep < MR_SPEED) return;
+  mr_lastStep = now;
+  for (int i = 0; i < NUM_LEDS1; i++) leds1[i].fadeToBlackBy(40);
+  for (int i = 0; i < NUM_LEDS2; i++) leds2[i].fadeToBlackBy(40);
+  for (int i = 0; i < MR_SIZE; i++) {
+    int p1 = mr_pos - i;
+    if (p1 >= 0 && p1 < NUM_LEDS1) leds1[p1] = CHSV((0 + i * 8) & 255, 255, 255);
+    if (p1 >= 0 && p1 < NUM_LEDS2) leds2[p1] = CHSV((160 + i * 8) & 255, 255, 255);
+  }
+  mr_pos += mr_dir;
+  if (mr_pos >= NUM_LEDS1 - 1 || mr_pos <= 0) mr_dir = -mr_dir;
 }
 
 void runLocalEffects() {
   unsigned long now = millis();
-
   if (now - lastEffectChange >= EFFECT_INTERVAL) {
-      effectIndex = (effectIndex + 1) % 7;
-      lastEffectChange = now;
+    effectIndex = (effectIndex + 1) % 5;
+    lastEffectChange = now;
   }
 
   switch (effectIndex) {
-      case 0: effectRainbow(); break;
-      case 1: effectFade(); break;
-      case 2: effectTwinkle(); break;
-      case 3: effectPulse(); break;
-      case 4: effectMeteor(); break;
-      case 5: effectFire(); break;
-      case 6: effectLightning(); break;
+    case 0: effectRainbow_update(); break;
+    case 1: effectFade_update(); break;
+    case 2: effectTwinkle_update(); break;
+    case 3: effectPulse_update(); break;
+    case 4: effectMeteor_update(); break;
   }
 }
 
-
+// ---------------- util ----------------
+extern int __heap_start, *__brkval;
+int freeMemory() {
+  int v;
+  return (int)&v - (__brkval == 0 ? (int)&__heap_start : (int)__brkval);
+}
 // ===== Setup =====
 void setup() {
+  // DESABILITA watchdog durante setup
+  wdt_disable();
+
+  pinMode(8, INPUT_PULLUP);   // botão Modo AT
+  delay(50);
+
+  bool modoAT = (digitalRead(8) == LOW);   // pressionado no boot?
+
+  if (modoAT) {
+    // ----------- MODO AT -----------
+    Serial.begin(9600);
+    Serial.println(F("=== MODO AT ==="));
+    Serial.println(F("Envie comandos #...;"));
+    
+    // Inicializações básicas mínimas para poder gravar/programar
+    Wire.begin();
+    rtc.begin();
+
+    // Carrega tarefas para permitir edição
+    carregarProgramacoesEEPROM(tarefa);
+
+    // Mantém sempre ativo (não entra em Vixen nem Standby)
+    while (true) {
+      wdt_reset();
+      while (Serial.available()) {
+        byte b = Serial.read();
+        processaByteSerial(b, tarefa, rtc);
+      }
+    }
+  }
+
+  // ----------- MODO NORMAL (VIXEN) -----------
   Serial.begin(57600);
+  Serial.println(F("Modo normal (Vixen) iniciado"));
+  
   pinMode(LED_STATUS, OUTPUT);
   pinMode(pinSH_CP, OUTPUT);
   pinMode(pinST_CP, OUTPUT);
   pinMode(pinDS, OUTPUT);
 
-  // inicia PCF8574s
+  // inicia I2C
+  Wire.begin();
+  Wire.setClock(100000);
+
+  // inicia PCF8574s com verificação
   for (int i = 0; i < QTDE_PCF; i++) {
-    uint8_t endereco = 0x20 + i;
-    pcfs[i].begin(endereco, &Wire);
-    for (uint8_t p = 0; p < 8; p++) {
-      pcfs[i].pinMode(p, OUTPUT);
-      // inicializa com nível de repouso (leva invertPCF em conta)
-      pcfs[i].digitalWrite(p, invertPCF[i] ? HIGH : LOW);
-    }
+      uint8_t endereco = 0x20 + i;
+      Wire.beginTransmission(endereco);
+      uint8_t err = Wire.endTransmission();
+      if (err == 0) {
+        pcfPresente[i] = true;                     // <-- agora grava no global ✔
+        pcfs[i].begin(endereco, &Wire);
+        for (uint8_t p = 0; p < 8; p++) {
+          pcfs[i].pinMode(p, OUTPUT);
+          pcfs[i].digitalWrite(p, invertPCF[i] ? HIGH : LOW);
+        }
+        Serial.print(F("PCF iniciado em 0x"));
+        Serial.println(endereco, HEX);
+      } else {
+        pcfPresente[i] = false;                    // <-- global ✔
+        Serial.print(F("PCF não detectado em 0x"));
+        Serial.println(endereco, HEX);
+      }
   }
+
 
   // limpa shift register (usa bufferRele e empurra)
   int totalBytes = (PORTAS_RELE + 7) / 8;
@@ -430,13 +350,18 @@ void setup() {
   carregarProgramacoesEEPROM(tarefa);
   //Inicializador de efeitos
   lastEffectChange = millis();
-
+  
+  Serial.print(F("RAM livre: "));
+  Serial.println(freeMemory());
+  
   ultimaRecepcao = millis();   // impede standby imediato
-  Serial.println("🚀 Sistema iniciado. Aguardando '$'...");
+  wdt_enable(WDTO_2S);
+  Serial.println(F("🚀 Sistema iniciado. Aguardando '$'..."));
 }
 
 // ===== Loop principal =====
 void loop() {
+  wdt_reset(); // alimenta watchdog
   static bool standbyAtivo = false;
 
   // Processa bytes da Serial — pode ser Vixen ($) ou comando (terminador ';')
@@ -496,10 +421,6 @@ void loop() {
       }
       continue;
     }
-
-    // Se não estamos em frame Vixen → bytes são comandos (terminador ';')
-    // Processa comando (Commands.cpp)
-    processaByteSerial(valor, tarefa, rtc);
   } // fim while Serial.available
 
   // Se entrou em frame e não recebeu bytes por timeout -> cancela frame
@@ -528,6 +449,7 @@ void loop() {
 
         // Liga TODOS os relés (atualiza buffer e módulos físicos)
         ligarTodosRele();
+        atualizarRele(); 
       }
     }
     runLocalEffects();
