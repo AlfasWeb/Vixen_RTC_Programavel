@@ -451,8 +451,9 @@ void loop() {
         ligarTodosRele();
         atualizarRele(); 
       }
+      runLocalEffects();
     }
-    runLocalEffects();
+    
     // ATUALIZAR LEDS E RELES MESMO EM STANDBY
     atualizarRele();
     FastLED.show();
