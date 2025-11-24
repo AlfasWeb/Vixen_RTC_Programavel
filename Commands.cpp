@@ -327,6 +327,14 @@ void processaComando(const char *cmdRaw, Programador &prog, RTC_DS1307 &rtc) {
         return;
     }
     // ---------------------------------------------------------
+    // RMx — Remover programação
+    // ---------------------------------------------------------
+    if (strncmp(cmd, "up", 2) == 0) {
+        rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
+        Serial.print("OK: Relogio atualizado ");
+        return;
+    }
+    // ---------------------------------------------------------
     // HR — Ajustar relógio
     // Formato: hrHH,MM,DD,MM,YYYY
     // ---------------------------------------------------------

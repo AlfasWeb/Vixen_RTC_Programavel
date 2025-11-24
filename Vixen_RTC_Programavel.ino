@@ -435,30 +435,45 @@ void loop() {
   unsigned long t = millis();
 
   if (millis() - ultimaRecepcao > 2000) {
+    tarefa.atualizar(agora.dayOfTheWeek(), agora.hour(), agora.minute());
+    bool ativo = tarefa.getEstadoAtual();
+
     if (t - ultimoRTC >= intervaloRTC) {
       ultimoRTC = t;
       agora = rtc.now();
+      // Imprime hora em standby
+      Serial.print(F("[STANDBY] "));
+      Serial.print(agora.hour());
+      Serial.print(':');
+      Serial.print(agora.minute());
+      Serial.print(':');
+      Serial.println(agora.second());
+      Serial.print("Status: ");
+      Serial.println((ativo)? "Ativado":"Desativado");
     }
-
-    // tarefa.atualizar devolve se mudou o estado global (true = ativo)
-    bool ativo = tarefa.atualizar(agora.dayOfTheWeek(), agora.hour(), agora.minute());
 
     if (ativo) {
       if (!standbyAtivo) {
         standbyAtivo = true;
-
-        // Liga TODOS os relés (atualiza buffer e módulos físicos)
         ligarTodosRele();
-        atualizarRele(); 
+        Serial.println(F("Entrou em STANDBY: ligarTodosRele() executado"));
       }
       runLocalEffects();
+      atualizarRele();
+      FastLED.show();
+      digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
+    } else {
+      // Se não está ativo, garantir que tudo permaneça desligado
+      if (standbyAtivo) {
+        standbyAtivo = false;
+        desligarTodosRele();
+        fill_solid(leds1, NUM_LEDS1, CRGB::Black);
+        fill_solid(leds2, NUM_LEDS2, CRGB::Black);
+        FastLED.show();
+        Serial.println(F("PROGRAMACAO INATIVA: tudo desligado"));
+      }
     }
-    
-    // ATUALIZAR LEDS E RELES MESMO EM STANDBY
-    atualizarRele();
-    FastLED.show();
-    digitalWrite(LED_STATUS, !digitalRead(LED_STATUS));
-    return; // volta cedo como no original (impede atualização normal)
+    return;
   }
 
   // ================================
